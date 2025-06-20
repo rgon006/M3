@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Face-Controlled Piano Sheet Flipper</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/face-api.js@latest"></script>
+  <script defer src="script.js"></script>
+</head>
+<body>
+  <h1>Face-Controlled Piano Sheet Flipper</h1>
+  <div class="upload-container">
+    <input type="file" id="sheetInput" multiple />
+    <button class="upload-btn">上传乐谱</button>
+    <div id="loading" class="spinner" style="display:none;"></div>
+  </div>
+  
+  <div class="viewer" id="viewer">
+    <img id="sheetDisplay" alt="Sheet Display" />
+    <div id="pageIndicator"></div>
+  </div>
+  
+  <div class="camera-container">
+    <video id="video" width="640" height="480" autoplay></video>
+    <canvas id="overlay" width="640" height="480"></canvas>
+  </div>
+</body>
+</html>
