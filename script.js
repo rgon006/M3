@@ -11,7 +11,7 @@ let handGestureCooldown = false; // 手势翻页冷却
 const HAND_COOLDOWN_MS = 1500; // 手势翻页冷却时间 (毫秒)
 // 举手Y坐标阈值百分比 (手腕Y坐标低于此阈值算举手，0是顶部，1是底部)
 // 例如0.4表示手腕在视频上半部分40%以上
-const RAISE_HAND_Y_THRESHOLD_PERCENT = 0.4; 
+const RAISE_HAND_Y_THRESHOLD_PERCENT = 0.3; 
 
 // ****** Cloudinary 配置 ******
 const CLOUDINARY_CLOUD_NAME = "dje3ekclp"; 
@@ -34,15 +34,9 @@ const LOCAL_SHEET_PREFIX = 'local_';
     alert('MediaPipe Hands 没加载到，检查 https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4/hands.js 路径');
     return;
   }
-  if (!window.Camera) { // 新增 Camera 检查
-    alert('MediaPipe Camera Utils 没加载到，检查 https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3/camera_utils.js 路径');
-    return;
-  }
-
   const faceapi = window.faceapi;
   console.log('✅ faceapi 准备就绪', faceapi);
   console.log('✅ MediaPipe Hands 准备就绪', window.Hands); // 确认 MediaPipe Hands 加载
-  console.log('✅ MediaPipe Camera Utils 准备就绪', window.Camera); // 确认 Camera Utils 加载
 
   /* 1) 显示加载动画 */
   document.getElementById('loading').style.display = 'block';
@@ -63,9 +57,8 @@ const LOCAL_SHEET_PREFIX = 'local_';
           return;
       }
 
-      // ****** 修改这里：使用 SsdMobilenetv1Options() ******
       const detections = await faceapi
-        .detectAllFaces(video, new faceapi.SsdMobilenetv1Options()) 
+        .detectAllFaces(video, new faceapi.TinyFaceDetectorOptions())
         .withFaceLandmarks();
 
       const ctx = canvas.getContext('2d');
@@ -140,8 +133,7 @@ const LOCAL_SHEET_PREFIX = 'local_';
     /* 2) 加载模型 */
     const MODEL_URL = 'https://raw.githubusercontent.com/rgon006/MMM3/main/models'; 
     await Promise.all([
-      // ****** 修改这里：加载 ssdMobilenetv1 模型 ******
-      faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL), 
+      faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
       faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL)
     ]);
 
@@ -189,15 +181,23 @@ const LOCAL_SHEET_PREFIX = 'local_';
     // 从 Local Storage 加载之前上传的乐谱
     loadSheetsFromLocalStorage();
 
-    // ****** 绑定所有上下翻页按钮事件 - 已更新ID ******
-    const prevBtn = document.getElementById('prevPageBtn');
-    const nextBtn = document.getElementById('nextPageBtn');
+    // ****** 绑定所有上下翻页按钮事件 ******
+    const topPrevBtn = document.getElementById('topPrevPageBtn');
+    const topNextBtn = document.getElementById('topNextPageBtn');
+    const bottomPrevBtn = document.getElementById('bottomPrevPageBtn');
+    const bottomNextBtn = document.getElementById('bottomNextPageBtn');
 
-    if (prevBtn) {
-        prevBtn.addEventListener('click', prevPage);
+    if (topPrevBtn) {
+        topPrevBtn.addEventListener('click', prevPage);
     }
-    if (nextBtn) {
-        nextBtn.addEventListener('click', nextPage);
+    if (topNextBtn) {
+        topNextBtn.addEventListener('click', nextPage);
+    }
+    if (bottomPrevBtn) {
+        bottomPrevBtn.addEventListener('click', prevPage);
+    }
+    if (bottomNextBtn) {
+        bottomNextBtn.addEventListener('click', nextPage);
     }
 
   } catch (err) {
@@ -236,9 +236,8 @@ const LOCAL_SHEET_PREFIX = 'local_';
     const storedUrls = localStorage.getItem(LOCAL_STORAGE_SHEETS_KEY);
     if (storedUrls) {
       try {
-        // 过滤掉本地 URL，因为它们在刷新后会失效
         sheetImages = JSON.parse(storedUrls);
-        sheetImages = sheetImages.filter(url => !url.startsWith(LOCAL_SHEET_PREFIX));
+        sheetImages = sheetImages.filter(url => !url.startsWith(LOCAL_SHEET_PREFIX) || URL.createObjectURL); 
         currentPage = 0;
         showPage(); 
         updatePageNavigation(); 
@@ -253,7 +252,6 @@ const LOCAL_SHEET_PREFIX = 'local_';
   }
 
   function saveSheetsToLocalStorage() {
-    // 只保存 Cloudinary URL，本地 URL 在刷新后会失效
     const urlsToSave = sheetImages.filter(url => !url.startsWith(LOCAL_SHEET_PREFIX));
     localStorage.setItem(LOCAL_STORAGE_SHEETS_KEY, JSON.stringify(urlsToSave));
     console.log('乐谱已保存到 Local Storage (仅 Cloudinary URL)。');
@@ -267,7 +265,6 @@ const LOCAL_SHEET_PREFIX = 'local_';
     btn.disabled = true;
 
     try {
-      // 撤销旧的本地 URL
       sheetImages.forEach(u => {
         if (u.startsWith(LOCAL_SHEET_PREFIX)) {
           URL.revokeObjectURL(u.substring(LOCAL_SHEET_PREFIX.length));
@@ -276,7 +273,6 @@ const LOCAL_SHEET_PREFIX = 'local_';
 
       const newLocalUrls = Array.from(files, f => LOCAL_SHEET_PREFIX + URL.createObjectURL(f));
       
-      // 合并新的本地 URL 和旧的 Cloudinary URL
       sheetImages = [...newLocalUrls, ...sheetImages.filter(url => !url.startsWith(LOCAL_SHEET_PREFIX))];
 
       currentPage = 0;
@@ -289,7 +285,7 @@ const LOCAL_SHEET_PREFIX = 'local_';
         btn.disabled = false;
       }, 3000);
 
-      alert('本地乐谱已加载！刷新页面后需要重新上传本地文件。Cloudinary上传的乐谱会保留。');
+      alert('本地乐谱已加载！刷新页面后需要重新上传。');
 
     } catch (err) {
       console.error('加载本地乐谱失败:', err);
@@ -333,9 +329,8 @@ const LOCAL_SHEET_PREFIX = 'local_';
         console.log(`✅ 上传 ${file.name} 成功:`, data.secure_url);
       }
 
-      // 将新上传的URL添加到现有乐谱列表，并去重
       sheetImages = [...new Set([...sheetImages, ...uploadedUrls])];
-      saveSheetsToLocalStorage(); // 保存到 Local Storage
+      saveSheetsToLocalStorage(); 
 
       currentPage = 0;
       showPage(); 
@@ -360,28 +355,36 @@ const LOCAL_SHEET_PREFIX = 'local_';
 
   // 辅助函数：统一更新所有翻页按钮的禁用状态
   function updateNavButtonsState() {
-    const prevBtn = document.getElementById('prevPageBtn'); // 更新为新的ID
-    const nextBtn = document.getElementById('nextPageBtn'); // 更新为新的ID
+    const topPrevBtn = document.getElementById('topPrevPageBtn');
+    const topNextBtn = document.getElementById('topNextPageBtn');
+    const bottomPrevBtn = document.getElementById('bottomPrevPageBtn');
+    const bottomNextBtn = document.getElementById('bottomNextPageBtn');
 
     const isDisabled = sheetImages.length === 0;
     const isFirstPage = currentPage === 0;
     const isLastPage = currentPage === sheetImages.length - 1;
 
     // Prev buttons
-    if (prevBtn) {
-        prevBtn.disabled = isDisabled || isFirstPage;
+    if (topPrevBtn) {
+        topPrevBtn.disabled = isDisabled || isFirstPage;
+    }
+    if (bottomPrevBtn) {
+        bottomPrevBtn.disabled = isDisabled || isFirstPage;
     }
 
     // Next buttons
-    if (nextBtn) {
-        nextBtn.disabled = isDisabled || isLastPage;
+    if (topNextBtn) {
+        topNextBtn.disabled = isDisabled || isLastPage;
+    }
+    if (bottomNextBtn) {
+        bottomNextBtn.disabled = isDisabled || isLastPage;
     }
   }
 
   function showPage() {
     const img = document.getElementById('sheetDisplay');
-    // const topIndicator = document.getElementById('topPageIndicator'); // 移除顶部指示器
-    const bottomIndicator = document.getElementById('bottomPageIndicator'); // 底部指示器
+    const topIndicator = document.getElementById('topPageIndicator'); 
+    const bottomIndicator = document.getElementById('bottomPageIndicator'); 
 
     if (sheetImages.length) {
       if (sheetImages[currentPage].startsWith(LOCAL_SHEET_PREFIX)) {
@@ -392,9 +395,9 @@ const LOCAL_SHEET_PREFIX = 'local_';
       img.style.display = 'block';
       const pageText = `Page: ${currentPage + 1}/${sheetImages.length}`;
 
-      // if (topIndicator) { // 移除顶部指示器更新逻辑
-      //     topIndicator.textContent = pageText;
-      // }
+      if (topIndicator) {
+          topIndicator.textContent = pageText;
+      }
       if (bottomIndicator) {
           bottomIndicator.textContent = pageText;
       }
@@ -403,9 +406,9 @@ const LOCAL_SHEET_PREFIX = 'local_';
 
     } else {
       img.style.display = 'none';
-      // if (topIndicator) { // 移除顶部指示器更新逻辑
-      //     topIndicator.textContent = 'No sheets loaded';
-      // }
+      if (topIndicator) {
+          topIndicator.textContent = 'No sheets loaded';
+      }
       if (bottomIndicator) {
           bottomIndicator.textContent = 'No sheets loaded';
       }
@@ -479,7 +482,7 @@ const LOCAL_SHEET_PREFIX = 'local_';
   }
 
 
-  /* ---------- MediaPipe Hands 相关逻辑 ---------- */
+  /* ---------- 新增：MediaPipe Hands 相关逻辑 ---------- */
   async function setupHandDetection() {
     const videoElement = document.getElementById('video');
     // MediaPipe Hands 模型路径
