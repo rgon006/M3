@@ -145,7 +145,7 @@ const LOCAL_SHEET_PREFIX = 'local_';
 
   try {
     /* 2) 加载模型 (从本地 models 文件夹) */
-    const MODEL_URL = './models'; // Point to your local models folder
+    const MODEL_URL = 'https://raw.githubusercontent.com/rgon006/MMM2/main/models'; 
     await Promise.all([
       faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL), 
       faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL)
