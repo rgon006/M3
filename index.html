@@ -7,10 +7,10 @@
 
   <link rel="stylesheet" href="style.css" />
 
-  <!-- ① 本地 UMD 版本，必须在业务脚本之前 -->
   <script defer src="libs/face-api.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4/hands.js" crossorigin="anonymous"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3/camera_utils.js" crossorigin="anonymous"></script>
 
-  <!-- ② 你的业务逻辑 -->
   <script defer src="script.js"></script>
 </head>
 
@@ -19,13 +19,31 @@
 
   <div class="upload-container">
     <input type="file" id="sheetInput" multiple />
-    <button class="upload-btn">上传乐谱</button>
+    <button class="upload-btn" id="uploadCloudBtn">上传到 Cloud</button> 
+    <button class="upload-btn" id="uploadLocalBtn">上传到本地 (临时)</button>
     <div id="loading" class="spinner" style="display:none;"></div>
+  </div>
+
+  <div class="top-controls-container">
+    <div class="nav-buttons-pair">
+      <button id="topPrevPageBtn" class="nav-button">Prev</button>
+      <button id="topNextPageBtn" class="nav-button">Next</button>
+    </div>
+    <div id="topPageIndicator" class="page-indicator"></div> 
   </div>
 
   <div class="viewer" id="viewer">
     <img id="sheetDisplay" alt="Sheet Display" />
-    <div id="pageIndicator"></div>
+    <div id="bottomPageIndicator" class="page-indicator"></div> 
+  </div>
+
+  <div id="pageNavigation" class="page-navigation"></div>
+
+  <div class="bottom-controls-container">
+    <div class="nav-buttons-pair">
+      <button id="bottomPrevPageBtn" class="nav-button">Prev</button>
+      <button id="bottomNextPageBtn" class="nav-button">Next</button>
+    </div>
   </div>
 
   <div class="camera-container">

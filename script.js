@@ -1,59 +1,53 @@
 /* ========== 全局状态 ========== */
-let sheetImages = [];
+let sheetImages = []; // 将存储乐谱的 URL 数组
 let currentPage = 0;
 let flipCooldown = false;
-// 新增：头部姿态检测的冷却时间
 let headTurnCooldown = false;
-const HEAD_TURN_COOLDOWN_MS = 1500; // 扭头翻页冷却时间 (毫秒)，可调整
-const YAW_THRESHOLD = 15; // 偏航角阈值 (像素差值)，需要根据实际测试调整
+const HEAD_TURN_COOLDOWN_MS = 1500;
+const YAW_THRESHOLD = 15;
+
+// ****** 新增：手势检测相关常量 ******
+let handGestureCooldown = false; // 手势翻页冷却
+const HAND_COOLDOWN_MS = 1500; // 手势翻页冷却时间 (毫秒)
+// 举手Y坐标阈值百分比 (手腕Y坐标低于此阈值算举手，0是顶部，1是底部)
+// 例如0.4表示手腕在视频上半部分40%以上
+const RAISE_HAND_Y_THRESHOLD_PERCENT = 0.4; 
+
+// ****** Cloudinary 配置 ******
+const CLOUDINARY_CLOUD_NAME = "dje3ekclp"; 
+const CLOUDINARY_UPLOAD_PRESET = "my_unsigned_upload"; 
+
+// 存储乐谱URL到Local Storage的键名
+const LOCAL_STORAGE_SHEETS_KEY = 'pianoSheetUrls';
+// 本地上传乐谱的标识前缀
+const LOCAL_SHEET_PREFIX = 'local_';
 
 /* ========== 立即执行的初始化 ========== */
 (async () => {
-  /* 0) 检查 faceapi 是否存在 */
+  /* 0) 检查 faceapi 和 MediaPipe 是否存在 */
   if (!window.faceapi) {
     alert('face-api.min.js 没加载到，检查 libs/face-api.min.js 路径或服务器根目录');
     return;
   }
+  // 检查 MediaPipe Hands 是否加载
+  if (!window.Hands) {
+    alert('MediaPipe Hands 没加载到，检查 https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4/hands.js 路径');
+    return;
+  }
+  if (!window.Camera) { // 新增 Camera 检查
+    alert('MediaPipe Camera Utils 没加载到，检查 https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3/camera_utils.js 路径');
+    return;
+  }
+
   const faceapi = window.faceapi;
   console.log('✅ faceapi 准备就绪', faceapi);
+  console.log('✅ MediaPipe Hands 准备就绪', window.Hands); // 确认 MediaPipe Hands 加载
+  console.log('✅ MediaPipe Camera Utils 准备就绪', window.Camera); // 确认 Camera Utils 加载
 
   /* 1) 显示加载动画 */
   document.getElementById('loading').style.display = 'block';
 
-  try {
-    /* 2) 加载模型 */
-    // 注意：如果您已经把模型文件下载到本地，建议使用相对路径 './models'
-    // 否则如果直接使用 raw.githubusercontent.com 可能会遇到 CORS 或速率限制问题
-    const MODEL_URL = 'https://raw.githubusercontent.com/rgon006/MMM/main/models';
-    await Promise.all([
-      faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
-      faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL)
-    ]);
-
-    console.log('✅ 模型加载完成');
-
-    /* 3) 打开摄像头 */
-    const video = document.getElementById('video');
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { width: 640, height: 480 }
-    });
-    video.srcObject = stream;
-
-    /* 4) 启动人脸检测循环 */
-    detectFaces();
-  } catch (err) {
-    console.error('Initialization failed:', err);
-    alert(`Camera error: ${err.message}`);
-    return;
-  } finally {
-    document.getElementById('loading').style.display = 'none';
-  }
-
-  /* 5) 绑定文件上传事件 */
-  document.getElementById('sheetInput')
-          .addEventListener('change', handleFileUpload);
-
-  /* ---------- 其余函数 ---------- */
+  /* ---------- 核心人脸检测和辅助函数 ---------- */
   function detectFaces() {
     const video = document.getElementById('video');
     const canvas = document.getElementById('overlay');
@@ -61,16 +55,17 @@ const YAW_THRESHOLD = 15; // 偏航角阈值 (像素差值)，需要根据实际
     faceapi.matchDimensions(canvas, displaySize);
 
     setInterval(async () => {
-      if (video.readyState !== 4) return; // 摄像头未就绪
-
-      // 确保地标模型已加载
+      if (video.readyState !== 4) return;
+      
+      // 检查 FaceLandmark68Net 是否加载，避免错误
       if (!faceapi.nets.faceLandmark68Net.isLoaded) {
           console.warn('FaceLandmark68Net 未加载，跳过地标检测相关功能。');
           return;
       }
 
+      // ****** 修改这里：使用 SsdMobilenetv1Options() ******
       const detections = await faceapi
-        .detectAllFaces(video, new faceapi.TinyFaceDetectorOptions())
+        .detectAllFaces(video, new faceapi.SsdMobilenetv1Options()) 
         .withFaceLandmarks();
 
       const ctx = canvas.getContext('2d');
@@ -80,151 +75,501 @@ const YAW_THRESHOLD = 15; // 偏航角阈值 (像素差值)，需要根据实际
       faceapi.draw.drawFaceLandmarks(canvas, resized);
 
       for (const d of resized) {
-        // 确保检测到地标
         if (!d.landmarks) {
             console.warn('当前检测对象没有地标信息，跳过嘴巴和头部姿态检测。');
             continue;
         }
 
-        // --- 张嘴检测 (现有功能) ---
-        // 使用您代码中现有的 getMouth() 和自定义 averageY
         const mouth = d.landmarks.getMouth();
-        // 检查 mouth 数组是否有效且包含足够的地标点
-        if (mouth && mouth.length >= 20) { // 确保 mouth 数组有足够的点来计算
+        if (mouth && mouth.length >= 20) {
             const topLipY = averageY([
-              mouth[2],  // 50
-              mouth[3],  // 51 (top center)
-              mouth[4],  // 52
-              mouth[13], // 61
-              mouth[14], // 62
-              mouth[15]  // 63
+              mouth[2], mouth[3], mouth[4], mouth[13], mouth[14], mouth[15]
             ]);
-
             const bottomLipY = averageY([
-              mouth[8],  // 56
-              mouth[9],  // 57 (bottom center)
-              mouth[10], // 58
-              mouth[17], // 65
-              mouth[18], // 66
-              mouth[19]  // 67
+              mouth[8], mouth[9], mouth[10], mouth[17], mouth[18], mouth[19]
             ]);
-
             const mouthHeight = bottomLipY - topLipY;
-            // console.log('嘴巴高度:', mouthHeight); // 调试用
-            if (mouthHeight > 15) { // 张嘴阈值（可以调）
-              nextPage(); // 调用 nextPage，这里是向右翻页
-              // console.log('张嘴翻页触发！');
-              // break; // 如果只允许一种方式翻页，可以保留 break
+            if (mouthHeight > 15) { // 嘴巴张开超过阈值
+              nextPage();
             }
-        } else {
-            // console.warn('嘴巴地标不完整，跳过张嘴检测。');
         }
 
-
-        // --- 头部扭动检测 (新增功能) ---
         if (!headTurnCooldown) {
-            const leftEye = d.landmarks.getLeftEye(); // 左眼地标点数组
-            const rightEye = d.landmarks.getRightEye(); // 右眼地标点数组
-            const nose = d.landmarks.getNose(); // 鼻子地标点数组 (鼻尖是第一个点)
+            const leftEye = d.landmarks.getLeftEye();
+            const rightEye = d.landmarks.getRightEye();
+            const nose = d.landmarks.getNose();
 
-            // 确保关键地标存在
             if (leftEye.length > 0 && rightEye.length > 0 && nose.length > 0) {
-                // 取眼睛和鼻子的中心点作为参考
                 const leftEyeCenterX = averageX(leftEye);
                 const rightEyeCenterX = averageX(rightEye);
-                const noseTipX = nose[0].x; // 鼻尖的X坐标
+                const noseTipX = nose[0].x;
 
-                // 简化：使用鼻尖X坐标与两眼中心X坐标的相对位置判断偏航
-                // 想象一下：头向左转，鼻尖会相对于两眼中心向右偏移（从摄像头的视角看）
-                // 头向右转，鼻尖会相对于两眼中心向左偏移
                 const eyeMidPointX = (leftEyeCenterX + rightEyeCenterX) / 2;
                 const yawDifference = noseTipX - eyeMidPointX;
 
-                // console.log('Yaw Difference (鼻尖X - 眼睛中心X):', yawDifference); // 调试用
-
-                if (yawDifference > YAW_THRESHOLD) { // 鼻尖相对于眼睛中心向右偏移 -> 头向左转
+                if (yawDifference > YAW_THRESHOLD) { // 头向左转
                     console.log('检测到头向左转，翻回上页！');
                     prevPage();
                     headTurnCooldown = true;
                     setTimeout(() => (headTurnCooldown = false), HEAD_TURN_COOLDOWN_MS);
-                } else if (yawDifference < -YAW_THRESHOLD) { // 鼻尖相对于眼睛中心向左偏移 -> 头向右转
+                } else if (yawDifference < -YAW_THRESHOLD) { // 头向右转
                     console.log('检测到头向右转，翻到下页！');
-                    nextPage(); // 调用 nextPage
+                    nextPage();
                     headTurnCooldown = true;
                     setTimeout(() => (headTurnCooldown = false), HEAD_TURN_COOLDOWN_MS);
                 }
-            } else {
-                // console.warn('获取眼睛或鼻子地标失败，跳过头部扭动检测。');
             }
         }
       }
     }, 300);
   }
 
-  // 您已有的 averageY 函数
   function averageY(points) {
-    if (!points || points.length === 0) return 0; // 防止除以零
+    if (!points || points.length === 0) return 0;
     return points.reduce((sum, pt) => sum + pt.y, 0) / points.length;
   }
 
-  // 新增 averageX 函数，用于计算X坐标平均值
   function averageX(points) {
     if (!points || points.length === 0) return 0;
     return points.reduce((sum, pt) => sum + pt.x, 0) / points.length;
   }
+  /* ---------- 核心人脸检测和辅助函数 END ---------- */
 
-  async function handleFileUpload(e) {
-    const files = e.target.files;
+
+  try {
+    /* 2) 加载模型 */
+    const MODEL_URL = 'https://raw.githubusercontent.com/rgon006/MMM3/main/models'; 
+    await Promise.all([
+      // ****** 修改这里：加载 ssdMobilenetv1 模型 ******
+      faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL), 
+      faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL)
+    ]);
+
+    console.log('✅ 模型加载完成');
+
+    /* 3) 打开摄像头 */
+    const video = document.getElementById('video');
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          width: { ideal: 640 },
+          height: { ideal: 480 },
+          facingMode: 'user' // 尝试前置摄像头
+        }
+      });
+      video.srcObject = stream;
+      console.log('✅ 摄像头（前置）已打开');
+    } catch (err) {
+      console.warn('获取前置摄像头失败，尝试获取后置摄像头:', err);
+      // 如果前置摄像头不可用，尝试后置摄像头作为备用
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            width: { ideal: 640 },
+            height: { ideal: 480 },
+            facingMode: 'environment' // 尝试后置摄像头
+          }
+        });
+        video.srcObject = stream;
+        console.log('✅ 摄像头（后置）已打开');
+        alert('前置摄像头不可用，已尝试使用后置摄像头。');
+      } catch (err2) {
+        console.error('无法访问任何摄像头:', err2);
+        alert(`无法访问任何摄像头: ${err2.message}\n请确保已授权并尝试刷新页面。`);
+        return; // 如果都失败，则终止后续操作
+      }
+    }
+
+    /* 4) 启动人脸检测循环 */
+    detectFaces();
+
+    // ****** 新增：设置手部检测 ******
+    setupHandDetection(); // 调用新的手部检测设置函数
+
+    // 从 Local Storage 加载之前上传的乐谱
+    loadSheetsFromLocalStorage();
+
+    // ****** 绑定所有上下翻页按钮事件 - 已更新ID ******
+    const prevBtn = document.getElementById('prevPageBtn');
+    const nextBtn = document.getElementById('nextPageBtn');
+
+    if (prevBtn) {
+        prevBtn.addEventListener('click', prevPage);
+    }
+    if (nextBtn) {
+        nextBtn.addEventListener('click', nextPage);
+    }
+
+  } catch (err) {
+    console.error('Initialization failed:', err);
+    alert(`初始化失败: ${err.message}`);
+    return;
+  } finally {
+    document.getElementById('loading').style.display = 'none';
+  }
+
+  /* 5) 绑定文件上传事件 */
+  document.getElementById('uploadCloudBtn')
+          .addEventListener('click', () => { 
+            const fileInput = document.getElementById('sheetInput');
+            if (fileInput.files.length === 0) {
+                alert('请选择乐谱文件进行上传！');
+                return;
+            }
+            handleCloudUpload(fileInput.files);
+          });
+
+  document.getElementById('uploadLocalBtn')
+          .addEventListener('click', () => { 
+            const fileInput = document.getElementById('sheetInput');
+            if (fileInput.files.length === 0) {
+                alert('请选择乐谱文件进行上传！');
+                return;
+            }
+            handleLocalUpload(fileInput.files);
+          });
+          
+  /* ---------- Cloudinary & Local Storage 相关的辅助函数 ---------- */
+
+  function loadSheetsFromLocalStorage() {
+    console.log('正在从 Local Storage 加载乐谱...');
+    const storedUrls = localStorage.getItem(LOCAL_STORAGE_SHEETS_KEY);
+    if (storedUrls) {
+      try {
+        // 过滤掉本地 URL，因为它们在刷新后会失效
+        sheetImages = JSON.parse(storedUrls);
+        sheetImages = sheetImages.filter(url => !url.startsWith(LOCAL_SHEET_PREFIX));
+        currentPage = 0;
+        showPage(); 
+        updatePageNavigation(); 
+        console.log(`✅ 从 Local Storage 加载了 ${sheetImages.length} 张乐谱。`);
+      } catch (e) {
+        console.error('解析 Local Storage 中的乐谱 URL 失败:', e);
+        sheetImages = []; 
+      }
+    } else {
+      console.log('Local Storage 中没有找到乐谱。');
+    }
+  }
+
+  function saveSheetsToLocalStorage() {
+    // 只保存 Cloudinary URL，本地 URL 在刷新后会失效
+    const urlsToSave = sheetImages.filter(url => !url.startsWith(LOCAL_SHEET_PREFIX));
+    localStorage.setItem(LOCAL_STORAGE_SHEETS_KEY, JSON.stringify(urlsToSave));
+    console.log('乐谱已保存到 Local Storage (仅 Cloudinary URL)。');
+  }
+
+  function handleLocalUpload(files) {
     if (!files.length) return;
-    const btn = document.querySelector('.upload-btn');
-    const txt = btn.innerHTML;
-    btn.innerHTML = '<div class="spinner"></div> Processing…';
+    const btn = document.getElementById('uploadLocalBtn');
+    const originalBtnText = btn.innerHTML;
+    btn.innerHTML = '<div class="spinner"></div> 加载中…';
+    btn.disabled = true;
 
     try {
-      sheetImages.forEach(u => URL.revokeObjectURL(u));
-      sheetImages = Array.from(files, f => URL.createObjectURL(f));
+      // 撤销旧的本地 URL
+      sheetImages.forEach(u => {
+        if (u.startsWith(LOCAL_SHEET_PREFIX)) {
+          URL.revokeObjectURL(u.substring(LOCAL_SHEET_PREFIX.length));
+        }
+      });
+
+      const newLocalUrls = Array.from(files, f => LOCAL_SHEET_PREFIX + URL.createObjectURL(f));
+      
+      // 合并新的本地 URL 和旧的 Cloudinary URL
+      sheetImages = [...newLocalUrls, ...sheetImages.filter(url => !url.startsWith(LOCAL_SHEET_PREFIX))];
+
       currentPage = 0;
       showPage();
+      updatePageNavigation();
 
-      btn.innerHTML = `<span style="color:#27ae60">✓</span> Loaded ${files.length}`;
-      setTimeout(() => (btn.innerHTML = txt), 3000);
+      btn.innerHTML = `<span style="color:#27ae60">✓</span> 加载了 ${files.length} 张！`;
+      setTimeout(() => {
+        btn.innerHTML = originalBtnText;
+        btn.disabled = false;
+      }, 3000);
+
+      alert('本地乐谱已加载！刷新页面后需要重新上传本地文件。Cloudinary上传的乐谱会保留。');
+
     } catch (err) {
-      console.error('Upload failed:', err);
-      btn.innerHTML = `<span style="color:#e74c3c">✗</span> Upload failed`;
-      setTimeout(() => (btn.innerHTML = txt), 3000);
+      console.error('加载本地乐谱失败:', err);
+      btn.innerHTML = `<span style="color:#e74c3c">✗</span> 加载失败`;
+      setTimeout(() => {
+        btn.innerHTML = originalBtnText;
+        btn.disabled = false;
+      }, 3000);
+      alert('加载本地乐谱失败。请检查控制台获取更多信息。');
+    }
+  }
+
+  async function handleCloudUpload(files) {
+    if (!files.length) return;
+    const btn = document.getElementById('uploadCloudBtn'); 
+    const originalBtnText = btn.innerHTML; 
+    btn.innerHTML = '<div class="spinner"></div> 上传中…';
+    btn.disabled = true; 
+
+    const uploadedUrls = [];
+
+    try {
+      for (const file of files) {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET); 
+
+        const uploadUrl = `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`;
+
+        const response = await fetch(uploadUrl, {
+          method: 'POST',
+          body: formData
+        });
+
+        if (!response.ok) {
+          throw new Error(`Cloudinary 上传失败: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        uploadedUrls.push(data.secure_url); 
+        console.log(`✅ 上传 ${file.name} 成功:`, data.secure_url);
+      }
+
+      // 将新上传的URL添加到现有乐谱列表，并去重
+      sheetImages = [...new Set([...sheetImages, ...uploadedUrls])];
+      saveSheetsToLocalStorage(); // 保存到 Local Storage
+
+      currentPage = 0;
+      showPage(); 
+      updatePageNavigation(); 
+
+      btn.innerHTML = `<span style="color:#27ae60">✓</span> 上传并加载了 ${uploadedUrls.length} 张！`;
+      setTimeout(() => {
+          btn.innerHTML = originalBtnText;
+          btn.disabled = false;
+      }, 3000);
+
+    } catch (err) {
+      console.error('上传乐谱失败:', err);
+      btn.innerHTML = `<span style="color:#e74c3c">✗</span> 上传失败`;
+      setTimeout(() => {
+          btn.innerHTML = originalBtnText;
+          btn.disabled = false;
+      }, 3000);
+      alert('上传乐谱失败。请检查控制台获取更多信息。');
+    }
+  }
+
+  // 辅助函数：统一更新所有翻页按钮的禁用状态
+  function updateNavButtonsState() {
+    const prevBtn = document.getElementById('prevPageBtn'); // 更新为新的ID
+    const nextBtn = document.getElementById('nextPageBtn'); // 更新为新的ID
+
+    const isDisabled = sheetImages.length === 0;
+    const isFirstPage = currentPage === 0;
+    const isLastPage = currentPage === sheetImages.length - 1;
+
+    // Prev buttons
+    if (prevBtn) {
+        prevBtn.disabled = isDisabled || isFirstPage;
+    }
+
+    // Next buttons
+    if (nextBtn) {
+        nextBtn.disabled = isDisabled || isLastPage;
     }
   }
 
   function showPage() {
     const img = document.getElementById('sheetDisplay');
-    const indicator = document.getElementById('pageIndicator');
+    // const topIndicator = document.getElementById('topPageIndicator'); // 移除顶部指示器
+    const bottomIndicator = document.getElementById('bottomPageIndicator'); // 底部指示器
 
     if (sheetImages.length) {
-      img.src = sheetImages[currentPage];
+      if (sheetImages[currentPage].startsWith(LOCAL_SHEET_PREFIX)) {
+        img.src = sheetImages[currentPage].substring(LOCAL_SHEET_PREFIX.length);
+      } else {
+        img.src = sheetImages[currentPage];
+      }
       img.style.display = 'block';
-      indicator.textContent = `Page: ${currentPage + 1}/${sheetImages.length}`;
+      const pageText = `Page: ${currentPage + 1}/${sheetImages.length}`;
+
+      // if (topIndicator) { // 移除顶部指示器更新逻辑
+      //     topIndicator.textContent = pageText;
+      // }
+      if (bottomIndicator) {
+          bottomIndicator.textContent = pageText;
+      }
+      updatePageNavigation(); 
+      updateNavButtonsState(); // 调用统一更新按钮状态的函数
+
     } else {
       img.style.display = 'none';
-      indicator.textContent = 'No sheets loaded';
+      // if (topIndicator) { // 移除顶部指示器更新逻辑
+      //     topIndicator.textContent = 'No sheets loaded';
+      // }
+      if (bottomIndicator) {
+          bottomIndicator.textContent = 'No sheets loaded';
+      }
+      updatePageNavigation(); 
+      updateNavButtonsState(); // 调用统一更新按钮状态的函数
     }
   }
 
-  function nextPage() {
-    if (!sheetImages.length || flipCooldown) return;
-    flipCooldown = true;
-    currentPage = (currentPage + 1) % sheetImages.length;
-    showPage();
-    setTimeout(() => (flipCooldown = false), 1000);
+  function updatePageNavigation() {
+    const pageNavContainer = document.getElementById('pageNavigation');
+    pageNavContainer.innerHTML = ''; 
+
+    if (sheetImages.length === 0) {
+        updateNavButtonsState(); // 确保没有乐谱时禁用所有按钮
+        return; 
+    }
+
+    const maxPagesToShow = 10; 
+    const startPage = Math.max(0, currentPage - Math.floor(maxPagesToShow / 2));
+    const endPage = Math.min(sheetImages.length - 1, startPage + maxPagesToShow - 1);
+
+    if (startPage > 0) {
+        const span = document.createElement('span');
+        span.textContent = '...';
+        span.classList.add('page-nav-ellipsis');
+        pageNavContainer.appendChild(span);
+    }
+
+    for (let i = startPage; i <= endPage; i++) {
+      const pageButton = document.createElement('button');
+      pageButton.textContent = i + 1; 
+      pageButton.classList.add('page-nav-button');
+      if (i === currentPage) {
+        pageButton.classList.add('active'); 
+      }
+      pageButton.addEventListener('click', () => {
+        currentPage = i;
+        showPage(); 
+      });
+      pageNavContainer.appendChild(pageButton);
+    }
+
+    if (endPage < sheetImages.length - 1) {
+        const span = document.createElement('span');
+        span.textContent = '...';
+        span.classList.add('page-nav-ellipsis');
+        pageNavContainer.appendChild(span);
+    }
+    updateNavButtonsState(); // 在生成页码导航后，也更新上下翻页按钮的状态
   }
 
-  // 新增 prevPage 函数
+
+  function nextPage() {
+    if (!sheetImages.length || flipCooldown) return;
+    if (currentPage < sheetImages.length - 1) { 
+        flipCooldown = true;
+        currentPage++;
+        showPage();
+        setTimeout(() => (flipCooldown = false), 1000);
+    }
+  }
+
   function prevPage() {
     if (!sheetImages.length || flipCooldown) return;
-    flipCooldown = true;
-    // (currentPage - 1 + sheetImages.length) % sheetImages.length 确保负数时也能正确循环
-    currentPage = (currentPage - 1 + sheetImages.length) % sheetImages.length;
-    showPage();
-    setTimeout(() => (flipCooldown = false), 1000);
+    if (currentPage > 0) { 
+        flipCooldown = true;
+        currentPage--;
+        showPage();
+        setTimeout(() => (flipCooldown = false), 1000);
+    }
+  }
+
+
+  /* ---------- MediaPipe Hands 相关逻辑 ---------- */
+  async function setupHandDetection() {
+    const videoElement = document.getElementById('video');
+    // MediaPipe Hands 模型路径
+    const hands = new Hands({
+      locateFile: (file) => {
+        return `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4/${file}`;
+      }
+    });
+
+    hands.setOptions({
+      maxNumHands: 2, // 最多检测两只手
+      modelComplexity: 1, // 模型复杂度，0, 1, 2。越高越准但越慢
+      minDetectionConfidence: 0.7, // 最小检测置信度
+      minTrackingConfidence: 0.7 // 最小跟踪置信度
+    });
+
+    hands.onResults(onHandDetectionResults); // 设置回调函数
+
+    // 使用 Camera 对象发送视频帧到 MediaPipe
+    // Camera API 通常用于 MediaPipe 示例，以确保帧被正确处理
+    const camera = new Camera(videoElement, {
+      onFrame: async () => {
+        await hands.send({ image: videoElement });
+      },
+      width: 640, // 确保与video元素的宽度一致
+      height: 480 // 确保与video元素的高度一致
+    });
+    camera.start();
+    console.log('✅ MediaPipe Hands 检测已启动');
+  }
+
+  function onHandDetectionResults(results) {
+    // 检查是否处于手势冷却期，如果是则不处理
+    if (handGestureCooldown) {
+      return; 
+    }
+
+    // 获取视频元素的实际尺寸，用于将归一化坐标转换为像素坐标
+    const videoElement = document.getElementById('video');
+    const videoHeight = videoElement.offsetHeight;
+    const videoWidth = videoElement.offsetWidth;
+    // 计算举手Y坐标的像素阈值
+    // MediaPipe的Y轴0是顶部，所以Y值越小表示越靠近顶部
+    const raiseYThresholdPx = videoHeight * RAISE_HAND_Y_THRESHOLD_PERCENT; 
+
+    let leftHandRaised = false; // 用户自己的左手是否举起
+    let rightHandRaised = false; // 用户自己的右手是否举起
+
+    if (results.multiHandLandmarks && results.multiHandedness) {
+      // 遍历检测到的每只手
+      for (let i = 0; i < results.multiHandLandmarks.length; i++) {
+        const landmarks = results.multiHandLandmarks[i];
+        const handedness = results.multiHandedness[i].label; // "Left" 或 "Right"
+
+        // 提取手腕关键点 (landmark 0) 的归一化 Y 坐标
+        const wristY = landmarks[0].y * videoHeight; // 转换为像素坐标
+        const wristX = landmarks[0].x * videoWidth; // 转换为像素坐标
+
+        // 判断手是否举起：手腕 Y 坐标低于阈值（即更靠近屏幕顶部）
+        const isRaised = wristY < raiseYThresholdPx;
+        
+        if (isRaised) {
+          // 在前置摄像头（user facingMode）下，画面是镜像的：
+          // 用户自己的右手 (MediaPipe label 'Left') 会出现在屏幕的左侧。
+          // 用户自己的左手 (MediaPipe label 'Right') 会出现在屏幕的右侧。
+
+          if (handedness === 'Left' && wristX < videoWidth / 2) {
+              // 识别到用户自己的右手 (MediaPipe label 'Left') 且在屏幕左半边
+              rightHandRaised = true; // 标记用户右手举起
+              console.log("检测到举起右手 (翻下一页)");
+          } else if (handedness === 'Right' && wristX > videoWidth / 2) {
+              // 识别到用户自己的左手 (MediaPipe label 'Right') 且在屏幕右半边
+              leftHandRaised = true; // 标记用户左手举起
+              console.log("检测到举起左手 (翻上一页)");
+          }
+        }
+      }
+    }
+
+    // 根据检测结果触发翻页
+    // 优先处理左手（向后翻页），如果同时举起，只会触发一个
+    if (leftHandRaised) {
+      prevPage();
+      handGestureCooldown = true;
+      setTimeout(() => (handGestureCooldown = false), HAND_COOLDOWN_MS);
+    } else if (rightHandRaised) {
+      nextPage();
+      handGestureCooldown = true;
+      setTimeout(() => (handGestureCooldown = false), HAND_COOLDOWN_MS);
+    }
   }
 
 })();
