@@ -1,107 +1,43 @@
-/* style.css */
+/* 在您的 style.css 文件中添加或修改 */
 
-/* ... 您已有的样式 ... */
-
-/* 新增：顶部和底部控制容器样式 */
-.top-controls-container,
-.bottom-controls-container {
-  display: flex; /* 使用 flexbox 布局 */
-  flex-direction: column; /* 让内部元素垂直堆叠 (按钮组在上，页码指示器在下) */
-  align-items: center;   /* 水平居中内部元素 */
-  margin: 15px auto;    /* 上下边距，auto 左右居中 */
-  width: fit-content;    /* 容器宽度适应内容 */
-  max-width: 90%;        /* 限制最大宽度，防止过宽 */
+.trigger-selection-container {
+    margin-top: 10px;
+    margin-bottom: 20px;
+    text-align: center;
+    font-size: 1.1em;
+    color: #333;
 }
 
-/* 新增：翻页按钮对的容器，用于并排显示Prev/Next */
-.nav-buttons-pair {
-  display: flex;
-  gap: 15px; /* Prev 和 Next 按钮之间的间距 */
-  margin-bottom: 10px; /* 按钮组与页码指示器之间的间距 */
+.trigger-selection-container label {
+    margin-right: 10px;
 }
 
-/* 翻页按钮通用样式 - 变大变蓝 */
-.nav-button {
-  background-color: #007bff; /* 亮蓝色 */
-  color: white;
-  border: none;
-  padding: 10px 20px; /* 增大内边距，使按钮变大 */
-  cursor: pointer;
-  font-size: 1.5em; /* 增大字体大小 */
-  border-radius: 8px; /* 稍微更圆的边角 */
-  transition: background-color 0.3s ease, transform 0.1s ease; /* 添加动画效果 */
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2); /* 按钮阴影，使其更突出 */
+.trigger-selection-container select {
+    padding: 8px 12px;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    font-size: 1em;
+    background-color: #f9f9f9;
+    cursor: pointer;
+    outline: none; /* 移除选中时的蓝色边框 */
+    appearance: none; /* 移除默认下拉箭头 */
+    background-image: url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%23000%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13.2-5.6H18.8c-7.2%200-13.2%205.8-13.2%2013.2%200%204%201.2%207.2%203.6%2010.8l128%20128c3.2%203.2%207%204.4%2010.8%204.4s7.6-1.2%2010.8-4.4l128-128c2.4-3.6%203.6-6.8%203.6-10.8z%22%2F%3E%3C%2Fsvg%3E'); /* 自定义下拉箭头 */
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    background-size: 12px;
 }
 
-/* 翻页按钮悬停样式 */
-.nav-button:hover:not(:disabled) {
-  background-color: #0056b3; /* 悬停时颜色变深 */
-  transform: translateY(-2px); /* 悬停时轻微上浮 */
+.trigger-selection-container select:hover {
+    border-color: #888;
 }
 
-/* 翻页按钮禁用样式 */
-.nav-button:disabled {
-  background-color: #a0a0a0; /* 禁用时显示灰色 */
-  color: #e0e0e0;
-  cursor: not-allowed;
-  box-shadow: none; /* 禁用时无阴影 */
-  transform: none; /* 禁用时无上浮效果 */
+.trigger-selection-container select:focus {
+    border-color: #007bff;
+    box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.25);
 }
 
-/* 顶部和底部页码指示器样式 (已经存在，确认位置和大小) */
-.page-indicator {
-  font-size: 1.2em; /* 确保可读性 */
-  color: #333;
-  margin-top: 5px; /* 与上方按钮或乐谱的间距 */
-  margin-bottom: 5px; /* 与下方按钮或乐谱的间距 */
-}
-
-/* 乐谱显示区域样式，确保内部元素布局正确 */
-.viewer {
-  position: relative; /* 保持相对定位，如果内部有绝对定位元素（例如底部页码指示器） */
-  display: flex; /* 使得图像居中 */
-  justify-content: center;
-  align-items: center;
-  flex-direction: column; /* 垂直堆叠：图片和底部指示器 */
-  margin: 20px auto;
-  max-width: 800px;
-  overflow: hidden;
-  /* 其他现有样式 */
-}
-
-#sheetDisplay {
-  max-width: 100%;
-  height: auto;
-  display: block;
-}
-
-/* 调整页码导航按钮 (1, 2, 3...) 的样式，使其与新按钮风格统一但略小 */
-.page-navigation {
-  margin-top: 25px; /* 与上方容器的间距 */
-  margin-bottom: 25px; /* 与下方容器的间距 */
-}
-
-.page-nav-button {
-  background-color: #f0f0f0;
-  border: 1px solid #ccc;
-  padding: 10px 15px; /* 略小于主翻页按钮 */
-  cursor: pointer;
-  border-radius: 4px;
-  font-size: 1.1em; /* 略小于主翻页按钮的字体 */
-  min-width: 40px;
-  box-sizing: border-box;
-  transition: background-color 0.2s, border-color 0.2s, color 0.2s;
-}
-
-.page-nav-button:hover {
-  background-color: #e0e0e0;
-  border-color: #bbb;
-}
-
-.page-nav-button.active {
-  background-color: #007bff; /* 保持蓝色高亮 */
-  color: white;
-  border-color: #007bff;
-  font-weight: bold;
-  cursor: default;
+/* 确保上传按钮和文件选择器也有适当的间距 */
+.upload-container {
+    margin-top: 20px;
+    margin-bottom: 20px;
 }
