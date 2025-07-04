@@ -1,60 +1,60 @@
-/* ========== 全局状态 ========== */
-let sheetImages = []; // 将存储乐谱的 URL 数组
+/* ========== Global State ========== */
+let sheetImages = []; // Array to store sheet music URLs
 let currentPage = 0;
-let flipCooldown = false; // 翻页冷却
+let flipCooldown = false; // Page flip cooldown
 
-// 头部姿态检测的冷却时间和阈值
-let headTurnCooldown = false; 
-const HEAD_TURN_COOLDOWN_MS = 1500; 
-const YAW_THRESHOLD = 8; // 偏航角阈值 (像素差值)，您可以根据实际测试调整，建议从8或更低开始测试
+// Head pose detection cooldown and threshold
+let headTurnCooldown = false;
+const HEAD_TURN_COOLDOWN_MS = 1500;
+const YAW_THRESHOLD = 8; // Yaw angle threshold (pixel difference), adjust based on testing, suggest starting from 8 or lower
 
-// ****** 新增：手势检测相关常量 ******
-let handGestureCooldown = false; // 手势翻页冷却
-const HAND_COOLDOWN_MS = 1500; // 手势翻页冷却时间 (毫秒)
-// 举手Y坐标阈值百分比 (手腕Y坐标低于此阈值算举手，0是顶部，1是底部)
-// 例如0.4表示手腕在视频上半部分40%以上
-const RAISE_HAND_Y_THRESHOLD_PERCENT = 0.4; 
+// ****** New: Hand gesture detection related constants ******
+let handGestureCooldown = false; // Hand gesture page flip cooldown
+const HAND_COOLDOWN_MS = 1500; // Hand gesture page flip cooldown time (milliseconds)
+// Hand raise Y coordinate threshold percentage (wrist Y coordinate below this threshold is considered raised, 0 is top, 1 is bottom)
+// For example, 0.4 means the wrist is in the upper 40% of the video
+const RAISE_HAND_Y_THRESHOLD_PERCENT = 0.4;
 
-// ****** 新增：当前选择的触发模式 ******
-let currentTriggerMode = 'mouth'; // 默认张嘴触发
+// ****** New: Currently selected trigger mode ******
+let currentTriggerMode = 'mouth'; // Default to mouth open trigger
 
-// ****** Cloudinary 配置 ******
-// TODO: 请替换为您的 Cloudinary Cloud name，根据您提供的截图，您的可能是 "dje3ekclp"
-const CLOUDINARY_CLOUD_NAME = "dje3ekclp"; 
-// TODO: 请替换为您在 Cloudinary 控制台创建的无符号上传预设名称，根据您提供的截图，您的可能是 "my_unsigned_upload"
-const CLOUDINARY_UPLOAD_PRESET = "my_unsigned_upload"; 
+// ****** Cloudinary Configuration ******
+// TODO: Please replace with your Cloudinary Cloud name, based on your screenshot, yours might be "dje3ekclp"
+const CLOUDINARY_CLOUD_NAME = "dje3ekclp";
+// TODO: Please replace with the unsigned upload preset name you created in your Cloudinary console, based on your screenshot, yours might be "my_unsigned_upload"
+const CLOUDINARY_UPLOAD_PRESET = "my_unsigned_upload";
 
-// 存储乐谱URL到Local Storage的键名
+// Key name for storing sheet music URLs in Local Storage
 const LOCAL_STORAGE_SHEETS_KEY = 'pianoSheetUrls';
-// 本地上传乐谱的标识前缀
+// Prefix for locally uploaded sheet music
 const LOCAL_SHEET_PREFIX = 'local_';
 
-/* ========== 立即执行的初始化 ========== */
+/* ========== Immediately Executing Initialization ========== */
 (async () => {
-  /* 0) 检查 faceapi 和 MediaPipe 是否存在 */
+  /* 0) Check if faceapi and MediaPipe exist */
   if (!window.faceapi) {
-    alert('face-api.min.js 没加载到，检查 libs/face-api.min.js 路径。');
+    alert('face-api.min.js not loaded, check libs/face-api.min.js path.');
     return;
   }
-  // 检查 MediaPipe Hands 是否加载
+  // Check if MediaPipe Hands is loaded
   if (!window.Hands) {
-    alert('MediaPipe Hands 没加载到，检查 https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4/hands.js 路径。');
+    alert('MediaPipe Hands not loaded, check https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4/hands.js path.');
     return;
   }
-  if (!window.Camera) { 
-    alert('MediaPipe Camera Utils 没加载到，检查 https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3/camera_utils.js 路径。');
+  if (!window.Camera) {
+    alert('MediaPipe Camera Utils not loaded, check https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3/camera_utils.js path.');
     return;
   }
 
   const faceapi = window.faceapi;
-  console.log('✅ faceapi 准备就绪', faceapi);
-  console.log('✅ MediaPipe Hands 准备就绪', window.Hands); 
-  console.log('✅ MediaPipe Camera Utils 准备就绪', window.Camera); 
+  console.log('✅ faceapi ready', faceapi);
+  console.log('✅ MediaPipe Hands ready', window.Hands);
+  console.log('✅ MediaPipe Camera Utils ready', window.Camera);
 
-  /* 1) 显示加载动画 */
+  /* 1) Show loading animation */
   document.getElementById('loading').style.display = 'block';
 
-  /* ---------- 核心人脸检测和辅助函数 ---------- */
+  /* ---------- Core Face Detection and Helper Functions ---------- */
   function detectFaces() {
     const video = document.getElementById('video');
     const canvas = document.getElementById('overlay');
@@ -63,16 +63,16 @@ const LOCAL_SHEET_PREFIX = 'local_';
 
     setInterval(async () => {
       if (video.readyState !== 4) return;
-      
-      // 检查 FaceLandmark68Net 是否加载，避免错误
+
+      // Check if FaceLandmark68Net is loaded to avoid errors
       if (!faceapi.nets.faceLandmark68Net.isLoaded) {
-          console.warn('FaceLandmark68Net 未加载，跳过地标检测相关功能。');
+          console.warn('FaceLandmark68Net not loaded, skipping landmark detection features.');
           return;
       }
 
-      // ****** 使用 SsdMobilenetv1Options() for more accuracy ******
+      // ****** Use SsdMobilenetv1Options() for more accuracy ******
       const detections = await faceapi
-        .detectAllFaces(video, new faceapi.SsdMobilenetv1Options()) 
+        .detectAllFaces(video, new faceapi.SsdMobilenetv1Options())
         .withFaceLandmarks();
 
       const ctx = canvas.getContext('2d');
@@ -83,11 +83,11 @@ const LOCAL_SHEET_PREFIX = 'local_';
 
       for (const d of resized) {
         if (!d.landmarks) {
-            //console.warn('当前检测对象没有地标信息，跳过嘴巴和头部姿态检测。'); // 避免刷屏
+            //console.warn('Current detected object has no landmark information, skipping mouth and head pose detection.'); // Avoid excessive logging
             continue;
         }
 
-        // ****** 根据 currentTriggerMode 判断是否执行嘴巴检测 ******
+        // ****** Determine whether to perform mouth detection based on currentTriggerMode ******
         if (currentTriggerMode === 'mouth' || currentTriggerMode === 'all') {
             const mouth = d.landmarks.getMouth();
             if (mouth && mouth.length >= 20) { // Check if mouth landmarks are available
@@ -99,13 +99,13 @@ const LOCAL_SHEET_PREFIX = 'local_';
                 ]);
                 const mouthHeight = bottomLipY - topLipY;
                 if (mouthHeight > 15) { // Mouth open threshold
-                  console.log('检测到张嘴，翻页！');
+                  console.log('Mouth open detected, flipping page!');
                   nextPage();
                 }
             }
         }
 
-        // ****** 根据 currentTriggerMode 判断是否执行扭头检测 ******
+        // ****** Determine whether to perform head turn detection based on currentTriggerMode ******
         if ((currentTriggerMode === 'headTurn' || currentTriggerMode === 'all') && !headTurnCooldown) {
             const leftEye = d.landmarks.getLeftEye();
             const rightEye = d.landmarks.getRightEye();
@@ -117,16 +117,16 @@ const LOCAL_SHEET_PREFIX = 'local_';
                 const noseTipX = nose[0].x;
 
                 const eyeMidPointX = (leftEyeCenterX + rightEyeCenterX) / 2;
-                const yawDifference = noseTipX - eyeMidPointX; 
-                // console.log('yawDifference:', yawDifference); // 调试用，稳定后可以移除
+                const yawDifference = noseTipX - eyeMidPointX;
+                // console.log('yawDifference:', yawDifference); // For debugging, can be removed once stable
 
                 if (yawDifference > YAW_THRESHOLD) { // Head turned left (relative to face orientation)
-                    console.log('检测到头向左转，翻回上页！');
+                    console.log('Head turned left detected, flipping to previous page!');
                     prevPage();
                     headTurnCooldown = true;
                     setTimeout(() => (headTurnCooldown = false), HEAD_TURN_COOLDOWN_MS);
                 } else if (yawDifference < -YAW_THRESHOLD) { // Head turned right
-                    console.log('检测到头向右转，翻到下页！');
+                    console.log('Head turned right detected, flipping to next page!');
                     nextPage();
                     headTurnCooldown = true;
                     setTimeout(() => (headTurnCooldown = false), HEAD_TURN_COOLDOWN_MS);
@@ -148,21 +148,21 @@ const LOCAL_SHEET_PREFIX = 'local_';
     if (!points || points.length === 0) return 0;
     return points.reduce((sum, pt) => sum + pt.x, 0) / points.length;
   }
-  /* ---------- 核心人脸检测和辅助函数 END ---------- */
+  /* ---------- Core Face Detection and Helper Functions END ---------- */
 
 
   try {
-    /* 2) 加载模型 (从本地 models 文件夹) */
+    /* 2) Load models (from local models folder) */
     const MODEL_URL = './models'; // Point to your local models folder
     await Promise.all([
-      // ****** 加载 ssdMobilenetv1 模型 ******
-      faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL), 
+      // ****** Load ssdMobilenetv1 model ******
+      faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL),
       faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL)
     ]);
 
-    console.log('✅ 模型加载完成');
+    console.log('✅ Models loaded');
 
-    /* 3) 打开摄像头 */
+    /* 3) Open camera */
     const video = document.getElementById('video');
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -173,9 +173,9 @@ const LOCAL_SHEET_PREFIX = 'local_';
         }
       });
       video.srcObject = stream;
-      console.log('✅ 摄像头（前置）已打开');
+      console.log('✅ Camera (front) opened');
     } catch (err) {
-      console.warn('获取前置摄像头失败，尝试获取后置摄像头:', err);
+      console.warn('Failed to get front camera, trying back camera:', err);
       // If front camera fails, try back camera as fallback
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
@@ -186,26 +186,26 @@ const LOCAL_SHEET_PREFIX = 'local_';
           }
         });
         video.srcObject = stream;
-        console.log('✅ 摄像头（后置）已打开');
-        alert('前置摄像头不可用，已尝试使用后置摄像头。');
+        console.log('✅ Camera (back) opened');
+        alert('Front camera not available, attempting to use back camera.');
       } catch (err2) {
-        console.error('无法访问任何摄像头:', err2);
-        alert(`无法访问任何摄像头: ${err2.message}\n请确保已授权并尝试刷新页面。`);
+        console.error('Cannot access any camera:', err2);
+        alert(`Cannot access any camera: ${err2.message}\nPlease ensure access is granted and try refreshing the page.`);
         return; // If both fail, terminate
       }
     }
 
-    /* 4) 启动人脸检测循环 */
+    /* 4) Start face detection loop */
     detectFaces();
 
-    // ****** 新增：设置手部检测 ******
-    // MediaPipe Hands 初始化必须始终进行，但其结果处理会受模式控制
-    setupHandDetection(); 
+    // ****** New: Set up hand detection ******
+    // MediaPipe Hands initialization must always occur, but its result processing is controlled by the mode
+    setupHandDetection();
 
     // From Local Storage load previously uploaded sheets
     loadSheetsFromLocalStorage();
 
-    // ****** 绑定翻页按钮事件 ******
+    // ****** Bind page navigation button events ******
     const prevBtn = document.getElementById('prevPageBtn');
     const nextBtn = document.getElementById('nextPageBtn');
 
@@ -216,56 +216,56 @@ const LOCAL_SHEET_PREFIX = 'local_';
         nextBtn.addEventListener('click', nextPage);
     }
 
-    // ****** 新增：绑定触发模式选择事件 ******
+    // ****** New: Bind trigger mode selection event ******
     const triggerModeSelect = document.getElementById('triggerModeSelect');
     if (triggerModeSelect) {
-        // 从 LocalStorage 读取上次选择的模式，如果没有，则默认为 'mouth'
+        // Read previously selected mode from LocalStorage, default to 'mouth' if none
         const storedMode = localStorage.getItem('selectedTriggerMode');
         if (storedMode) {
             triggerModeSelect.value = storedMode;
         }
-        currentTriggerMode = triggerModeSelect.value; // 初始化当前模式
-        
+        currentTriggerMode = triggerModeSelect.value; // Initialize current mode
+
         triggerModeSelect.addEventListener('change', (event) => {
             currentTriggerMode = event.target.value;
-            localStorage.setItem('selectedTriggerMode', currentTriggerMode); // 保存选择
-            console.log('当前触发模式已切换为:', currentTriggerMode);
+            localStorage.setItem('selectedTriggerMode', currentTriggerMode); // Save selection
+            console.log('Current trigger mode switched to:', currentTriggerMode);
         });
     }
 
   } catch (err) {
     console.error('Initialization failed:', err);
-    alert(`初始化失败: ${err.message}`);
+    alert(`Initialization failed: ${err.message}`);
     return;
   } finally {
     document.getElementById('loading').style.display = 'none';
   }
 
-  /* 5) 绑定文件上传事件 */
+  /* 5) Bind file upload events */
   document.getElementById('uploadCloudBtn')
-          .addEventListener('click', () => { 
+          .addEventListener('click', () => {
             const fileInput = document.getElementById('sheetInput');
             if (fileInput.files.length === 0) {
-                alert('请选择乐谱文件进行上传！');
+                alert('Please select sheet music files to upload!');
                 return;
             }
             handleCloudUpload(fileInput.files);
           });
 
   document.getElementById('uploadLocalBtn')
-          .addEventListener('click', () => { 
+          .addEventListener('click', () => {
             const fileInput = document.getElementById('sheetInput');
             if (fileInput.files.length === 0) {
-                alert('请选择乐谱文件进行上传！');
+                alert('Please select sheet music files to upload!');
                 return;
             }
             handleLocalUpload(fileInput.files);
           });
-          
-  /* ---------- Cloudinary & Local Storage 相关的辅助函数 ---------- */
+
+  /* ---------- Cloudinary & Local Storage Related Helper Functions ---------- */
 
   function loadSheetsFromLocalStorage() {
-    console.log('正在从 Local Storage 加载乐谱...');
+    console.log('Loading sheets from Local Storage...');
     const storedUrls = localStorage.getItem(LOCAL_STORAGE_SHEETS_KEY);
     if (storedUrls) {
       try {
@@ -273,15 +273,15 @@ const LOCAL_SHEET_PREFIX = 'local_';
         sheetImages = JSON.parse(storedUrls);
         sheetImages = sheetImages.filter(url => !url.startsWith(LOCAL_SHEET_PREFIX));
         currentPage = 0;
-        showPage(); 
-        updatePageNavigation(); 
-        console.log(`✅ 从 Local Storage 加载了 ${sheetImages.length} 张乐谱。`);
+        showPage();
+        updatePageNavigation();
+        console.log(`✅ Loaded ${sheetImages.length} sheets from Local Storage.`);
       } catch (e) {
-        console.error('解析 Local Storage 中的乐谱 URL 失败:', e);
-        sheetImages = []; 
+        console.error('Failed to parse sheet music URLs from Local Storage:', e);
+        sheetImages = [];
       }
     } else {
-      console.log('Local Storage 中没有找到乐谱。');
+      console.log('No sheets found in Local Storage.');
     }
   }
 
@@ -289,14 +289,14 @@ const LOCAL_SHEET_PREFIX = 'local_';
     // Only save Cloudinary URLs; local URLs are invalid after refresh
     const urlsToSave = sheetImages.filter(url => !url.startsWith(LOCAL_SHEET_PREFIX));
     localStorage.setItem(LOCAL_STORAGE_SHEETS_KEY, JSON.stringify(urlsToSave));
-    console.log('乐谱已保存到 Local Storage (仅 Cloudinary URL)。');
+    console.log('Sheets saved to Local Storage (Cloudinary URLs only).');
   }
 
   function handleLocalUpload(files) {
     if (!files.length) return;
     const btn = document.getElementById('uploadLocalBtn');
     const originalBtnText = btn.innerHTML;
-    btn.innerHTML = '<div class="spinner"></div> 加载中…';
+    btn.innerHTML = '<div class="spinner"></div> Loading…';
     btn.disabled = true;
 
     try {
@@ -308,7 +308,7 @@ const LOCAL_SHEET_PREFIX = 'local_';
       });
 
       const newLocalUrls = Array.from(files, f => LOCAL_SHEET_PREFIX + URL.createObjectURL(f));
-      
+
       // Merge new local URLs with existing Cloudinary URLs (if any)
       sheetImages = [...newLocalUrls, ...sheetImages.filter(url => !url.startsWith(LOCAL_SHEET_PREFIX))];
 
@@ -316,31 +316,31 @@ const LOCAL_SHEET_PREFIX = 'local_';
       showPage();
       updatePageNavigation();
 
-      btn.innerHTML = `<span style="color:#27ae60">✓</span> 加载了 ${files.length} 张！`;
+      btn.innerHTML = `<span style="color:#27ae60">✓</span> Loaded ${files.length} sheets!`;
       setTimeout(() => {
         btn.innerHTML = originalBtnText;
         btn.disabled = false;
       }, 3000);
 
-      alert('本地乐谱已加载！刷新页面后需要重新上传本地文件。Cloudinary上传的乐谱会保留。');
+      alert('Local sheet music loaded! Local files need to be re-uploaded after refreshing the page. Cloudinary uploaded sheets will be retained.');
 
     } catch (err) {
-      console.error('加载本地乐谱失败:', err);
-      btn.innerHTML = `<span style="color:#e74c3c">✗</span> 加载失败`;
+      console.error('Failed to load local sheet music:', err);
+      btn.innerHTML = `<span style="color:#e74c3c">✗</span> Load Failed`;
       setTimeout(() => {
         btn.innerHTML = originalBtnText;
         btn.disabled = false;
       }, 3000);
-      alert('加载本地乐谱失败。请检查控制台获取更多信息。');
+      alert('Failed to load local sheet music. Check console for more information.');
     }
   }
 
   async function handleCloudUpload(files) {
     if (!files.length) return;
-    const btn = document.getElementById('uploadCloudBtn'); 
-    const originalBtnText = btn.innerHTML; 
-    btn.innerHTML = '<div class="spinner"></div> 上传中…';
-    btn.disabled = true; 
+    const btn = document.getElementById('uploadCloudBtn');
+    const originalBtnText = btn.innerHTML;
+    btn.innerHTML = '<div class="spinner"></div> Uploading…';
+    btn.disabled = true;
 
     const uploadedUrls = [];
 
@@ -348,7 +348,7 @@ const LOCAL_SHEET_PREFIX = 'local_';
       for (const file of files) {
         const formData = new FormData();
         formData.append('file', file);
-        formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET); 
+        formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
 
         const uploadUrl = `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`;
 
@@ -358,12 +358,12 @@ const LOCAL_SHEET_PREFIX = 'local_';
         });
 
         if (!response.ok) {
-          throw new Error(`Cloudinary 上传失败: ${response.statusText}`);
+          throw new Error(`Cloudinary upload failed: ${response.statusText}`);
         }
 
         const data = await response.json();
-        uploadedUrls.push(data.secure_url); 
-        console.log(`✅ 上传 ${file.name} 成功:`, data.secure_url);
+        uploadedUrls.push(data.secure_url);
+        console.log(`✅ Successfully uploaded ${file.name}:`, data.secure_url);
       }
 
       // Add new uploaded URLs to the existing sheet list and remove duplicates
@@ -371,30 +371,30 @@ const LOCAL_SHEET_PREFIX = 'local_';
       saveSheetsToLocalStorage(); // Save to Local Storage
 
       currentPage = 0;
-      showPage(); 
-      updatePageNavigation(); 
+      showPage();
+      updatePageNavigation();
 
-      btn.innerHTML = `<span style="color:#27ae60">✓</span> 上传并加载了 ${uploadedUrls.length} 张！`;
+      btn.innerHTML = `<span style="color:#27ae60">✓</span> Uploaded and loaded ${uploadedUrls.length} sheets!`;
       setTimeout(() => {
           btn.innerHTML = originalBtnText;
           btn.disabled = false;
       }, 3000);
 
     } catch (err) {
-      console.error('上传乐谱失败:', err);
-      btn.innerHTML = `<span style="color:#e74c3c">✗</span> 上传失败`;
+      console.error('Failed to upload sheet music:', err);
+      btn.innerHTML = `<span style="color:#e74c3c">✗</span> Upload Failed`;
       setTimeout(() => {
           btn.innerHTML = originalBtnText;
           btn.disabled = false;
       }, 3000);
-      alert('上传乐谱失败。请检查控制台获取更多信息。');
+      alert('Failed to upload sheet music. Check console for more information.');
     }
   }
 
   // Helper function: Update disable state of navigation buttons
   function updateNavButtonsState() {
-    const prevBtn = document.getElementById('prevPageBtn'); 
-    const nextBtn = document.getElementById('nextPageBtn'); 
+    const prevBtn = document.getElementById('prevPageBtn');
+    const nextBtn = document.getElementById('nextPageBtn');
 
     const isDisabled = sheetImages.length === 0;
     const isFirstPage = currentPage === 0;
@@ -413,7 +413,7 @@ const LOCAL_SHEET_PREFIX = 'local_';
 
   function showPage() {
     const img = document.getElementById('sheetDisplay');
-    const bottomIndicator = document.getElementById('bottomPageIndicator'); 
+    const bottomIndicator = document.getElementById('bottomPageIndicator');
 
     if (sheetImages.length) {
       if (sheetImages[currentPage].startsWith(LOCAL_SHEET_PREFIX)) {
@@ -427,29 +427,29 @@ const LOCAL_SHEET_PREFIX = 'local_';
       if (bottomIndicator) {
           bottomIndicator.textContent = pageText;
       }
-      updatePageNavigation(); 
-      updateNavButtonsState(); 
+      updatePageNavigation();
+      updateNavButtonsState();
 
     } else {
       img.style.display = 'none';
       if (bottomIndicator) {
           bottomIndicator.textContent = 'No sheets loaded';
       }
-      updatePageNavigation(); 
-      updateNavButtonsState(); 
+      updatePageNavigation();
+      updateNavButtonsState();
     }
   }
 
   function updatePageNavigation() {
     const pageNavContainer = document.getElementById('pageNavigation');
-    pageNavContainer.innerHTML = ''; 
+    pageNavContainer.innerHTML = '';
 
     if (sheetImages.length === 0) {
-        updateNavButtonsState(); 
-        return; 
+        updateNavButtonsState();
+        return;
     }
 
-    const maxPagesToShow = 10; 
+    const maxPagesToShow = 10;
     const startPage = Math.max(0, currentPage - Math.floor(maxPagesToShow / 2));
     const endPage = Math.min(sheetImages.length - 1, startPage + maxPagesToShow - 1);
 
@@ -462,14 +462,14 @@ const LOCAL_SHEET_PREFIX = 'local_';
 
     for (let i = startPage; i <= endPage; i++) {
       const pageButton = document.createElement('button');
-      pageButton.textContent = i + 1; 
+      pageButton.textContent = i + 1;
       pageButton.classList.add('page-nav-button');
       if (i === currentPage) {
-        pageButton.classList.add('active'); 
+        pageButton.classList.add('active');
       }
       pageButton.addEventListener('click', () => {
         currentPage = i;
-        showPage(); 
+        showPage();
       });
       pageNavContainer.appendChild(pageButton);
     }
@@ -480,13 +480,13 @@ const LOCAL_SHEET_PREFIX = 'local_';
         span.classList.add('page-nav-ellipsis');
         pageNavContainer.appendChild(span);
     }
-    updateNavButtonsState(); 
+    updateNavButtonsState();
   }
 
 
   function nextPage() {
     if (!sheetImages.length || flipCooldown) return;
-    if (currentPage < sheetImages.length - 1) { 
+    if (currentPage < sheetImages.length - 1) {
         flipCooldown = true;
         currentPage++;
         showPage();
@@ -496,7 +496,7 @@ const LOCAL_SHEET_PREFIX = 'local_';
 
   function prevPage() {
     if (!sheetImages.length || flipCooldown) return;
-    if (currentPage > 0) { 
+    if (currentPage > 0) {
         flipCooldown = true;
         currentPage--;
         showPage();
@@ -505,7 +505,7 @@ const LOCAL_SHEET_PREFIX = 'local_';
   }
 
 
-  /* ---------- MediaPipe Hands 相关逻辑 ---------- */
+  /* ---------- MediaPipe Hands Related Logic ---------- */
   async function setupHandDetection() {
     const videoElement = document.getElementById('video');
     // MediaPipe Hands model path
@@ -516,34 +516,34 @@ const LOCAL_SHEET_PREFIX = 'local_';
     });
 
     hands.setOptions({
-      maxNumHands: 2, 
+      maxNumHands: 2,
       modelComplexity: 1, // Model complexity: 0, 1, 2. Higher is more accurate but slower.
-      minDetectionConfidence: 0.7, 
-      minTrackingConfidence: 0.7 
+      minDetectionConfidence: 0.7,
+      minTrackingConfidence: 0.7
     });
 
-    hands.onResults(onHandDetectionResults); 
+    hands.onResults(onHandDetectionResults);
 
     // Use Camera object to send video frames to MediaPipe
     const camera = new Camera(videoElement, {
       onFrame: async () => {
         await hands.send({ image: videoElement });
       },
-      width: 640, 
-      height: 480 
+      width: 640,
+      height: 480
     });
     camera.start();
-    console.log('✅ MediaPipe Hands 检测已启动');
+    console.log('✅ MediaPipe Hands detection started');
   }
 
   function onHandDetectionResults(results) {
-    // ****** 根据 currentTriggerMode 判断是否执行举手检测 ******
+    // ****** Determine whether to perform hand raise detection based on currentTriggerMode ******
     if (!(currentTriggerMode === 'handRaise' || currentTriggerMode === 'all')) {
-        return; // 如果当前模式不是举手或所有，则不处理手势
+        return; // If current mode is not hand raise or all, do not process hand gestures
     }
 
     if (handGestureCooldown) {
-      return; 
+      return;
     }
 
     // Get actual video element dimensions for converting normalized coordinates
@@ -551,7 +551,7 @@ const LOCAL_SHEET_PREFIX = 'local_';
     const videoHeight = videoElement.offsetHeight;
     const videoWidth = videoElement.offsetWidth;
     // Calculate Y-coordinate pixel threshold for hand raise (0 is top, 1 is bottom)
-    const raiseYThresholdPx = videoHeight * RAISE_HAND_Y_THRESHOLD_PERCENT; 
+    const raiseYThresholdPx = videoHeight * RAISE_HAND_Y_THRESHOLD_PERCENT;
 
     let leftHandRaised = false; // User's left hand
     let rightHandRaised = false; // User's right hand
@@ -568,7 +568,7 @@ const LOCAL_SHEET_PREFIX = 'local_';
 
         // Determine if hand is raised: wrist Y coordinate is below the threshold (closer to top of screen)
         const isRaised = wristY < raiseYThresholdPx;
-        
+
         if (isRaised) {
           // For a front-facing camera ('user' facingMode), the image is mirrored:
           // User's own RIGHT hand (MediaPipe label 'Left') appears on the LEFT side of the screen.
@@ -577,11 +577,11 @@ const LOCAL_SHEET_PREFIX = 'local_';
           if (handedness === 'Left' && wristX < videoWidth / 2) {
               // Detected user's RIGHT hand (MediaPipe label 'Left') on the left half of the screen
               rightHandRaised = true; // Mark user's right hand as raised
-              console.log("检测到举起右手 (翻下一页)");
+              console.log("Right hand raised detected (flip next page)");
           } else if (handedness === 'Right' && wristX > videoWidth / 2) {
               // Detected user's LEFT hand (MediaPipe label 'Right') on the right half of the screen
               leftHandRaised = true; // Mark user's left hand as raised
-              console.log("检测到举起左手 (翻上一页)");
+              console.log("Left hand raised detected (flip previous page)");
           }
         }
       }
